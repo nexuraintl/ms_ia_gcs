@@ -1,145 +1,133 @@
 from flask import Blueprint, request, jsonify, current_app
 from ..services.gcs_service import GCSService
 
-upload_bp = Blueprint('upload', __name__)
+upload_bp = Blueprint("upload", __name__)
 
-
-@upload_bp.route('/subir', methods=['POST'])
-def upload_chunked():
+@upload_bp.route("/start-upload", methods=["POST"])
+def start_upload():
     """
-    Sube archivo Y lo divide automáticamente en chunks
-    El usuario solo envía el archivo.
+    Crea una sesión de carga reanudable en GCS y devuelve session_url.
+
+    Body (JSON):
+      - filename: str (requerido)
+      - file_size: int (requerido, bytes)
+      - content_type: str (opcional)
     """
     try:
-        # Validar que hay archivo
-        if 'file' not in request.files:
+        data = request.get_json(silent=True) or {}
+
+        filename = data.get("filename")
+        file_size = data.get("file_size")
+        content_type = data.get("content_type", "application/octet-stream")
+
+        if not filename or not str(filename).strip():
+            return jsonify({"error": "filename es requerido"}), 400
+
+        if file_size is None:
+            return jsonify({"error": "file_size es requerido"}), 400
+
+        try:
+            file_size = int(file_size)
+        except (TypeError, ValueError):
+            return jsonify({"error": "file_size debe ser un entero"}), 400
+
+        if file_size <= 0:
+            return jsonify({"error": "file_size debe ser > 0"}), 400
+
+        max_size = current_app.config.get("MAX_FILE_SIZE")
+        if max_size and file_size > int(max_size):
             return jsonify({
-                'error': 'No se encontró archivo'
+                "error": f"Archivo excede tamaño máximo permitido: {max_size} bytes"
             }), 400
-        
-        file = request.files['file']
-        
-        if file.filename == '':
-            return jsonify({'error': 'Nombre de archivo vacío'}), 400
-        
-        # Obtener tamaño
-        file.seek(0, 2)  
-        file_size = file.tell()
-        file.seek(0)  
-        
-        current_app.logger.info(f"Recibido archivo: {file.filename} ({file_size} bytes)")
-        
-        # Validar tamaño
-        max_size = current_app.config['MAX_FILE_SIZE']
-        if file_size > max_size:
-            return jsonify({
-                'error': f'Archivo excede tamaño máximo: {max_size} bytes'
-            }), 400
-        
-        # Subir en chunks
+
         gcs = GCSService()
-        result = gcs.upload_in_chunks_auto(
-            file=file,
-            filename=file.filename,
-            content_type=file.content_type or 'application/octet-stream'
+        result = gcs.start_resumable_upload(
+            filename=filename,
+            file_size=file_size,
+            content_type=content_type
         )
-        
-        current_app.logger.info(f"Upload completado: {result['unique_filename']}")
-        
+
+        current_app.logger.info(
+            f"Resumable session creada: {result.get('unique_filename')} ({file_size} bytes)"
+        )
         return jsonify(result), 200
-        
+
     except Exception as e:
-        current_app.logger.error(f'Error: {str(e)}')
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        current_app.logger.error(f"Error en /start-upload: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 
-@upload_bp.route('/cargararchivo', methods=['POST'])
-def upload_direct():
-    """
-    Sube archivo directamente SIN chunks     
-    """
-    try:
-        if 'file' not in request.files:
-            return jsonify({
-                'error': 'No se encontró archivo',
-            }), 400
-        
-        file = request.files['file']
-        
-        if file.filename == '':
-            return jsonify({'error': 'Nombre de archivo vacío'}), 400
-        
-        file.seek(0, 2)
-        file_size = file.tell()
-        file.seek(0)
-        
-        max_size = current_app.config['MAX_FILE_SIZE']
-        if file_size > max_size:
-            return jsonify({
-                'error': f'Archivo excede tamaño máximo: {max_size} bytes'
-            }), 400
-        
-        gcs = GCSService()
-        result = gcs.upload_file_directly(file)
-        
-        current_app.logger.info(f"Archivo subido: {result['unique_filename']}")
-        
-        return jsonify(result), 200
-        
-    except Exception as e:
-        current_app.logger.error(f'Error: {str(e)}')
-        return jsonify({'error': str(e)}), 500
-
-
-@upload_bp.route('/comprobar', methods=['POST'])
+@upload_bp.route("/comprobar", methods=["POST"])
 def verify_upload():
     """
-    Verifica si el archivo se subió correctamente
+    Verifica si un archivo existe en GCS.
+
+    Body (JSON):
+      - filename: str (requerido)
     """
     try:
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({'error': 'Body vacío'}), 400
-        
-        filename = data.get('filename')
-        
-        if not filename:
-            return jsonify({'error': 'nombre de archivo requerido'}), 400
-        
+        data = request.get_json(silent=True) or {}
+        filename = data.get("filename")
+
+        if not filename or not str(filename).strip():
+            return jsonify({"error": "filename es requerido"}), 400
+
         gcs = GCSService()
         result = gcs.verify_file(filename)
-        
-        if result['exists']:
+
+        if result.get("exists"):
             current_app.logger.info(f"Archivo verificado: {filename}")
             return jsonify(result), 200
-        else:
-            return jsonify(result), 404
-        
+
+        return jsonify(result), 404
+
     except Exception as e:
-        current_app.logger.error(f'Error: {str(e)}')
-        return jsonify({'error': str(e)}), 500
+        current_app.logger.error(f"Error en /comprobar: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 
-@upload_bp.route('/list', methods=['GET'])
+@upload_bp.route("/list", methods=["GET"])
 def list_files():
     """
-    Lista archivos en el bucket
+    Lista archivos del bucket.
+
+    Query params:
+      - prefix: str (opcional)
+      - max_results: int (opcional, default 20, max 100)
     """
     try:
-        max_results = request.args.get('max_results', 20, type=int)
-        prefix = request.args.get('prefix', '')
-        
+        prefix = request.args.get("prefix", "", type=str)
+        max_results = request.args.get("max_results", 20, type=int)
+
         if max_results > 100:
             max_results = 100
-        
+        if max_results < 1:
+            max_results = 1
+
         gcs = GCSService()
-        result = gcs.list_files(prefix, max_results)
-        
+        result = gcs.list_files(prefix=prefix, max_results=max_results)
         return jsonify(result), 200
-        
+
     except Exception as e:
-        current_app.logger.error(f'Error: {str(e)}')
-        return jsonify({'error': str(e)}), 500
+        current_app.logger.error(f"Error en /list: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@upload_bp.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
+
+
+@upload_bp.route("/", methods=["GET"])
+def index():
+    return jsonify({
+        "service": "GCS Resumable Upload Gateway",
+        "status": "running",
+        "endpoints": {
+            "start_upload": "POST /api/start-upload",
+            "verify": "POST /api/comprobar",
+            "list": "GET /api/list?prefix=&max_results=",
+            "health": "GET /api/health"
+        },
+        "note": "El archivo NO se sube al servicio. Se sube directo a GCS usando session_url."
+    }), 200

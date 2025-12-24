@@ -10,7 +10,7 @@ __pycache__/
 venv/
 ENV/
 env/
-
+.env
 # Variables de entorno locales
 .env
 .env.local
