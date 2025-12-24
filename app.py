@@ -25,7 +25,7 @@ def index():
         'status': 'running',
         'endpoints': {
             'start_upload': 'POST /api/start-upload',
-            'verify': 'POST /api/verify',
+            'verify': 'POST /api/comprobar',
             'calculate_chunks': 'POST /api/calculate-chunks'
         }
     }), 200
@@ -44,7 +44,7 @@ def not_found(error):
             'GET /',
             'GET /health',
             'POST /api/start-upload',
-            'POST /api/verify',
+            'POST /api/comprobar',
             'POST /api/calculate-chunks'
         ]
     }), 404
