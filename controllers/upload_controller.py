@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app
-from ..services.gcs_service import GCSService
+from services.gcs_service import GCSService
 
 upload_bp = Blueprint("upload", __name__)
 

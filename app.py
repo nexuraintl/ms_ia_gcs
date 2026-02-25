@@ -1,6 +1,6 @@
 from flask import Flask, jsonify
-from .config import Config
-from .controllers.upload_controller import upload_bp
+from config import Config
+from controllers.upload_controller import upload_bp
 import logging
 import os
 
