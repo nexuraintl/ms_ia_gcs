@@ -1,13 +1,13 @@
 from google.cloud import storage
 from flask import current_app
 import uuid
-
+from datetime import timedelta
 
 class GCSService:
     """
     Servicio para GCS enfocado a resumable uploads:
     - Cloud Run genera session_url
-    - El cliente sube DIRECTO a GCS usando esa URL (PUT + Content-Range)
+    - El cliente sube DIRECTO a GCS usando esa URL 
     """
 
     def __init__(self):
@@ -31,7 +31,6 @@ class GCSService:
             )
 
         unique_filename = f"{uuid.uuid4()}_{filename}"
-
         blob = self.bucket.blob(unique_filename)
 
         session_url = blob.create_resumable_upload_session(
@@ -52,7 +51,7 @@ class GCSService:
             "bucket": self.bucket_name
         }
 
-    def verify_file(self, filename):
+    def verify_file(self, filename: str):
         """
         Verifica si un archivo existe en GCS y obtiene su información
         """
@@ -84,7 +83,7 @@ class GCSService:
             "bucket": self.bucket_name
         }
 
-    def list_files(self, prefix="", max_results=20):
+    def list_files(self, prefix: str = "", max_results: int = 20):
         """
         Lista archivos en el bucket
         """
@@ -112,4 +111,31 @@ class GCSService:
             "total_size_mb": round(total_size / (1024 ** 2), 2),
             "total_size_gb": round(total_size / (1024 ** 3), 2),
             "files": files
+        }
+
+    def generate_download_signed_url(self, object_name: str, expires_in: int = 900):
+        """
+        Genera una URL firmada temporal para descargar el objeto (sin pasar por Cloud Run).
+        expires_in en segundos (ej: 900 = 15 min)
+        """
+        blob = self.bucket.blob(object_name)
+
+        if not blob.exists():
+            return {
+                "success": False,
+                "error": "Objeto no existe",
+                "name": object_name
+            }
+
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(seconds=expires_in),
+            method="GET"
+        )
+
+        return {
+            "success": True,
+            "name": object_name,
+            "expires_in": expires_in,
+            "url": url
         }

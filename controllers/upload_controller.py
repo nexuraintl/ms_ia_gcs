@@ -1,9 +1,10 @@
 from flask import Blueprint, request, jsonify, current_app
-from services.gcs_service import GCSService
-
+from ..services.gcs_service import GCSService
 
 upload_bp = Blueprint("upload", __name__)
 
+
+# crear session_url
 @upload_bp.route("/start-upload", methods=["POST"])
 def start_upload():
     """
@@ -58,6 +59,9 @@ def start_upload():
         return jsonify({"error": str(e)}), 500
 
 
+# =========================
+# Verificar si existe un objeto
+# =========================
 @upload_bp.route("/comprobar", methods=["POST"])
 def verify_upload():
     """
@@ -87,6 +91,7 @@ def verify_upload():
         return jsonify({"error": str(e)}), 500
 
 
+# Listar objetos del bucket
 @upload_bp.route("/list", methods=["GET"])
 def list_files():
     """
@@ -94,14 +99,14 @@ def list_files():
 
     Query params:
       - prefix: str (opcional)
-      - max_results: int (opcional, default 20, max 100)
+      - max_results: int (opcional, default 20, max 200)
     """
     try:
         prefix = request.args.get("prefix", "", type=str)
         max_results = request.args.get("max_results", 20, type=int)
 
-        if max_results > 100:
-            max_results = 100
+        if max_results > 200:
+            max_results = 200
         if max_results < 1:
             max_results = 1
 
@@ -111,6 +116,35 @@ def list_files():
 
     except Exception as e:
         current_app.logger.error(f"Error en /list: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@upload_bp.route("/download-url", methods=["GET"])
+def get_download_url():
+    """
+    Genera una URL firmada (temporal) para descargar desde GCS sin pasar por Cloud Run.
+
+    Query params:
+      - name: str (requerido) -> nombre exacto del objeto en el bucket
+      - expires: int (opcional) -> segundos (default 900, min 60, max 3600)
+    """
+    try:
+        name = request.args.get("name", type=str)
+        if not name or not name.strip():
+            return jsonify({"error": "name es requerido (nombre del objeto en el bucket)"}), 400
+
+        expires = request.args.get("expires", 900, type=int)
+        if expires < 60:
+            expires = 60
+        if expires > 3600:
+            expires = 3600
+
+        gcs = GCSService()
+        result = gcs.generate_download_signed_url(object_name=name, expires_in=expires)
+        return jsonify(result), (200 if result.get("success") else 404)
+
+    except Exception as e:
+        current_app.logger.error(f"Error en /download-url: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -128,6 +162,7 @@ def index():
             "start_upload": "POST /api/start-upload",
             "verify": "POST /api/comprobar",
             "list": "GET /api/list?prefix=&max_results=",
+            "download_url": "GET /api/download-url?name=...&expires=900",
             "health": "GET /api/health"
         },
         "note": "El archivo NO se sube al servicio. Se sube directo a GCS usando session_url."
