@@ -35,6 +35,13 @@ def index():
 def health():
     return jsonify({'status': 'healthy'}), 200
 
+@app.route("/version")
+def version():
+    return jsonify({
+        "service": "ms_ia_gcs",
+        "version": "1.0.0"
+    }), 200
+
 # Error handler
 @app.errorhandler(404)
 def not_found(error):
